@@ -1,6 +1,6 @@
 import pygame
 import sys
-from game import SnakeGame, SKINS  # Import SKINS
+from game import SnakeGame, SKINS, ACHIEVEMENT_THRESHOLDS, load_achievements  # Import new items
 import pygame_emojis
 
 pygame.init()
@@ -32,11 +32,38 @@ def draw_button(surface, text, font, color, hover_color, center, mouse_pos):
     surface.blit(text_surf, rect)
     return button_rect
 
+def show_achievements(screen):
+    achievements = load_achievements()
+    running = True
+    while running:
+        mouse_pos = pygame.mouse.get_pos()
+        screen.fill(BG_COLOR)
+        draw_text(screen, "Achievements", TITLE_FONT, BUTTON_COLOR, (screen.get_width()//2, 120))
+        y = 220
+        for threshold in ACHIEVEMENT_THRESHOLDS:
+            unlocked = threshold in achievements
+            color = (255, 215, 0) if unlocked else (120, 120, 120)
+            status = "Unlocked" if unlocked else "Locked"
+            text = f"{threshold} Points: {status}"
+            draw_text(screen, text, BUTTON_FONT, color, (screen.get_width()//2, y))
+            y += 60
+        back_rect = draw_button(
+            screen, "Back", BUTTON_FONT, BUTTON_COLOR, BUTTON_HOVER,
+            (screen.get_width()//2, y+40), mouse_pos
+        )
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if back_rect.collidepoint(event.pos):
+                    running = False
+        pygame.display.flip()
+
 def show_menu(screen):
     running = True
     selected_skin = 0
     skin_btn_rects = []
-
     while running:
         mouse_pos = pygame.mouse.get_pos()
         screen.fill(BG_COLOR)
@@ -65,11 +92,14 @@ def show_menu(screen):
             screen, "Start", BUTTON_FONT, BUTTON_COLOR, BUTTON_HOVER,
             (screen.get_width()//2, screen.get_height()//2 + 60), mouse_pos
         )
+        achievements_rect = draw_button(
+            screen, "Achievements", BUTTON_FONT, BUTTON_COLOR, BUTTON_HOVER,
+            (screen.get_width()//2, screen.get_height()//2 + 120), mouse_pos
+        )
         exit_rect = draw_button(
             screen, "Exit", BUTTON_FONT, EXIT_COLOR, EXIT_HOVER,
             (screen.get_width()//2, screen.get_height()//2 + 180), mouse_pos
         )
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -80,11 +110,12 @@ def show_menu(screen):
                         selected_skin = idx
                 if start_rect.collidepoint(event.pos):
                     SnakeGame(screen, skin_idx=selected_skin).run()
-                    running = True  # Show menu again after returning from game
+                    running = True
+                elif achievements_rect.collidepoint(event.pos):
+                    show_achievements(screen)
                 elif exit_rect.collidepoint(event.pos):
                     pygame.quit()
                     sys.exit()
-
         pygame.display.flip()
 
 if __name__ == "__main__":
