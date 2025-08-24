@@ -1,223 +1,191 @@
-import pygame
-import pygame_emojis
+import tkinter as tk
 import random
 import json
 import os
-import sys
 import time
-import math
 
-GRID_SIZE = 32
-BASE_SPEED = 8.0
-SPEED_INCREMENT = 2.0
+SIZE = 20
+DELAY = 8
+MOVE_INTERVAL = 6
 HIGHSCORE_FILE = "highscore.json"
-ACHIEVEMENT_FILE = "achievments.csv"
-ACHIEVEMENT_THRESHOLDS = [10, 20, 30, 50, 100, 250, 500]
-
-SKINS = [
-    {"name": "Classic", "head": (0, 200, 0), "body": (0, 150, 0)},
-    {"name": "Blue", "head": (0, 120, 255), "body": (0, 80, 180)},
-    {"name": "Red", "head": (220, 40, 40), "body": (180, 0, 0)},
-    {"name": "Yellow", "head": (255, 220, 0), "body": (200, 180, 0)},
-    {"name": "White", "head": (255,255,255), "body": (255,255,255)}, # Placeholder
-]
-
-FOODS = ["🍇", "🍈", "🍉", "🍊", "🍋", "🍋‍🟩", "🍌", "🍍", "🥭", "🍐", "🍑", "🍒", "🍓", "🫐", "🥝", "🍎", "🍏"]
-
-def get_rainbow_color(i, t):
-    # i: segment index, t: time
-    freq = 0.3
-    r = int(128 + 127 * math.sin(freq * i + t))
-    g = int(128 + 127 * math.sin(freq * i + t + 2))
-    b = int(128 + 127 * math.sin(freq * i + t + 4))
-    return (r, g, b)
-
-def load_achievements():
-    if os.path.exists(ACHIEVEMENT_FILE):
-        try:
-            with open(ACHIEVEMENT_FILE, "r") as f:
-                lines = f.read().splitlines()
-                return set(int(line) for line in lines if line.strip().isdigit())
-        except:
-            return set()
-    return set()
-
-def save_achievements(achievements):
-    try:
-        with open(ACHIEVEMENT_FILE, "w") as f:
-            for ach in sorted(achievements):
-                f.write(f"{ach}\n")
-    except:
-        pass
 
 class SnakeGame:
-    def __init__(self, screen, skin_idx=0, legendary_unlocked=False):
-        pygame.init()
-        self.screen = screen
-        self.screen_width = screen.get_width()
-        self.screen_height = screen.get_height()
-        self.grid_width = self.screen_width // GRID_SIZE
-        self.grid_height = (self.screen_height - 60) // GRID_SIZE
-        self.font = pygame.font.SysFont("Consolas", 24)
-        self.big_font = pygame.font.SysFont("Consolas", 48, bold=True)
-        self.button_font = pygame.font.SysFont("Consolas", 32)
-        self.emoji_font = pygame.font.SysFont("Noto Color Emoji", int(GRID_SIZE * 0.8))
-        self.clock = pygame.time.Clock()
+    def __init__(self, root, on_exit=None):
+        self.root = root
+        self.on_exit = on_exit
+
+        self.root.attributes("-fullscreen", True)
+        self.screen_width = root.winfo_screenwidth()
+        self.screen_height = root.winfo_screenheight()
+
+        self.canvas = tk.Canvas(root, width=self.screen_width, height=self.screen_height, bg="black", highlightthickness=0)
+        self.canvas.pack()
+
+        self.score = 0
         self.highscore = self.load_highscore()
-        self.state = "menu"
-        self.skin_idx = skin_idx
-        self.legendary_unlocked = legendary_unlocked
-        self.achievements = load_achievements()
+
+        self.score_text = self.canvas.create_text(10, 10, anchor="nw", fill="white", font=("Consolas", 20),
+                                                  text=f"Score: 0    Highscore: {self.highscore}")
+
+        self.restart_button = tk.Button(root, text="Restart", command=self.restart_game,
+                                        bg="black", fg="lime", font=("Consolas", 18))
+        self.exit_button = tk.Button(root, text="Exit", command=self.exit_game,
+                                     bg="black", fg="red", font=("Consolas", 18))
+        self.menu_button_gameover = tk.Button(root, text="Menu", command=self.return_to_menu,
+                                              bg="black", fg="cyan", font=("Consolas", 18))
+
+        self.pause_frame = tk.Frame(root, bg="black")
+        self.resume_button = tk.Button(self.pause_frame, text="Resume", command=self.resume_game,
+                                       bg="black", fg="lime", font=("Consolas", 18))
+        self.menu_button_pause = tk.Button(self.pause_frame, text="Menu", command=self.return_to_menu,
+                                           bg="black", fg="cyan", font=("Consolas", 18))
+        self.exit_button2 = tk.Button(self.pause_frame, text="Exit", command=self.exit_game,
+                                      bg="black", fg="red", font=("Consolas", 18))
+
+        self.root.bind("<KeyPress>", self.change_direction)
+
+        self.active_powerup = None
+        self.powerup_effect_until = 0
+        self.powerups = []
+        self.paused = False
+
+        self.start_game()
 
     def start_game(self):
-        self.direction = "RIGHT"
-        self.snake = [(5, self.grid_height // 2), (4, self.grid_height // 2), (3, self.grid_height // 2)]
+        self.direction = "Right"
+        self.snake = [(100, 100), (80, 100), (60, 100)]
         self.food = self.create_food()
         self.score = 0
-        self.state = "game"
-        self.last_move_time = time.time()
-        self.speed = BASE_SPEED
+        self.running = True
+        self.frame_count = 0
+        self.update_score()
+        self.powerups.clear()
+        self.active_powerup = None
+        self.powerup_effect_until = 0
+
+        self.restart_button.place_forget()
+        self.exit_button.place_forget()
+        self.menu_button_gameover.place_forget()
+        self.pause_frame.place_forget()
+
+        self.update()
 
     def restart_game(self):
+        self.canvas.delete("all")
+        self.score_text = self.canvas.create_text(10, 10, anchor="nw", fill="white", font=("Consolas", 20),
+                                                  text=f"Score: 0    Highscore: {self.highscore}")
         self.start_game()
 
     def exit_game(self):
-        pygame.quit()
-        sys.exit()
+        self.root.destroy()
 
     def return_to_menu(self):
-        self.state = "menu"
+        self.running = False
+        self.paused = False
+        self.canvas.destroy()
+        self.pause_frame.place_forget()
+        if self.on_exit:
+            self.on_exit()
 
     def pause_game(self):
-        self.state = "pause"
+        self.paused = True
+        self.pause_frame.place(relx=0.5, rely=0.5, anchor="center")
+        self.resume_button.pack(pady=5)
+        self.menu_button_pause.pack(pady=5)
+        self.exit_button2.pack(pady=5)
 
     def resume_game(self):
-        self.state = "game"
+        self.paused = False
+        self.pause_frame.place_forget()
+        self.resume_button.pack_forget()
+        self.menu_button_pause.pack_forget()
+        self.exit_button2.pack_forget()
+        self.update()
 
-    def change_direction(self, key):
-        opposites = {"UP": "DOWN", "DOWN": "UP", "LEFT": "RIGHT", "RIGHT": "LEFT"}
+    def change_direction(self, event):
+        key = event.keysym
+        opposites = {"Up": "Down", "Down": "Up", "Left": "Right", "Right": "Left"}
         if key in opposites and key != opposites[self.direction]:
             self.direction = key
+        elif key == "Escape":
+            if self.paused:
+                self.resume_game()
+            else:
+                self.pause_game()
 
     def move(self):
         head_x, head_y = self.snake[0]
-        dx, dy = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}[self.direction]
+        dx, dy = {"Up": (0, -SIZE), "Down": (0, SIZE), "Left": (-SIZE, 0), "Right": (SIZE, 0)}[self.direction]
         new_head = (head_x + dx, head_y + dy)
 
         if (new_head in self.snake or
-            new_head[0] < 0 or new_head[0] >= self.grid_width or
-            new_head[1] < 0 or new_head[1] >= self.grid_height):
-            self.state = "gameover"
+            new_head[0] < 0 or new_head[0] >= self.screen_width or
+            new_head[1] < 0 or new_head[1] >= self.screen_height):
+            self.running = False
             return
 
         self.snake.insert(0, new_head)
 
-        if new_head == self.food[0]:
-            self.score += 1
+        if new_head == self.food:
+            self.score += 2 if self.active_powerup == "double" else 1
             if self.score > self.highscore:
                 self.highscore = self.score
                 self.save_highscore()
-                self.check_achievements(self.highscore)
             self.food = self.create_food()
-            self.speed = BASE_SPEED + (self.score // 10) * SPEED_INCREMENT
+            self.update_score()
         else:
             self.snake.pop()
 
+        # Powerup felszedés
+        for p in self.powerups:
+            if new_head == p["pos"]:
+                self.active_powerup = p["type"]
+                self.powerup_effect_until = time.time() + 5
+                self.powerups.remove(p)
+                break
+
+        # Powerup spawn (ha nincs kint és pont osztható 10-zel)
+        if self.score % 10 == 0 and not self.powerups:
+            self.spawn_powerup()
+
     def draw(self):
-        self.screen.fill((40, 40, 40))
-        # Draw play area border
-        pygame.draw.rect(self.screen, (200, 200, 200), (0, 60, self.screen_width, self.screen_height-60), 2)
-        skin = SKINS[self.skin_idx]
-        t = time.time()
-        for i, (x, y) in enumerate(self.snake):
-            if self.skin_idx == 4 and self.legendary_unlocked:  # Legendary
-                color = get_rainbow_color(i, t)
-                # Glow effect: draw blurred rect behind
-                for glow in range(12, 0, -4):
-                    glow_color = (min(255, color[0]+80), min(255, color[1]+80), min(255, color[2]+80))
-                    glow_rect = pygame.Rect(x*GRID_SIZE-glow//2, y*GRID_SIZE+60-glow//2, GRID_SIZE+glow, GRID_SIZE+glow)
-                    pygame.draw.rect(self.screen, glow_color, glow_rect, border_radius=GRID_SIZE//2)
-                pygame.draw.rect(self.screen, color, (x*GRID_SIZE, y*GRID_SIZE+60, GRID_SIZE, GRID_SIZE), border_radius=GRID_SIZE//2)
-            else:
-                color = skin["head"] if i == 0 else skin["body"]
-                pygame.draw.rect(self.screen, color, (x*GRID_SIZE, y*GRID_SIZE+60, GRID_SIZE, GRID_SIZE), border_radius=8)
-        # Draw food (emoji)
-        fx, fy = self.food[0]
-        emoji = self.food[1]
-        emoji_surf = self.emoji_font.render(emoji, True, (255, 255, 255))
-        # Scale emoji to fit exactly in the grid cell
-        emoji_surf = pygame.transform.smoothscale(emoji_surf, (GRID_SIZE, GRID_SIZE))
-        self.screen.blit(emoji_surf, (fx*GRID_SIZE, fy*GRID_SIZE+60))
-        # Draw score bar
-        pygame.draw.rect(self.screen, (30, 30, 30), (0, 0, self.screen_width, 60))
-        score_text = self.font.render(f"Score: {self.score}    Highscore: {self.highscore}", True, (255, 255, 255))
-        self.screen.blit(score_text, (20, 20))
+        self.canvas.delete("snake", "food", "powerup")
+        for (x, y) in self.snake:
+            self.canvas.create_rectangle(x, y, x + SIZE, y + SIZE, fill="green", outline="", tags="snake")
+        fx, fy = self.food
+        self.canvas.create_oval(fx, fy, fx + SIZE, fy + SIZE, fill="red", outline="", tags="food")
 
-    def draw_menu(self):
-        self.screen.fill((40, 40, 40))
-        title = self.big_font.render("Snake Game", True, (0, 200, 0))
-        self.screen.blit(title, (self.screen_width // 2 - title.get_width() // 2, 120))
+        for p in self.powerups:
+            x, y = p["pos"]
+            color = "cyan" if p["type"] == "slow" else "lime"
+            symbol = "🐢" if p["type"] == "slow" else "🍀"
+            self.canvas.create_text(x + SIZE // 2, y + SIZE // 2, text=symbol, fill=color,
+                                    font=("Consolas", SIZE), tags="powerup")
 
-        start_btn = self.button_font.render("Start", True, (255, 255, 255))
-        exit_btn = self.button_font.render("Exit", True, (200, 0, 0))
+    def update(self):
+        if self.paused:
+            return
 
-        self.start_btn_rect = start_btn.get_rect(center=(self.screen_width // 2, 300))
-        self.exit_btn_rect = exit_btn.get_rect(center=(self.screen_width // 2, 360))
+        if time.time() > self.powerup_effect_until:
+            self.active_powerup = None
 
-        self.screen.blit(start_btn, self.start_btn_rect)
-        self.screen.blit(exit_btn, self.exit_btn_rect)
+        interval = MOVE_INTERVAL + 4 if self.active_powerup == "slow" else MOVE_INTERVAL
 
-        # Skin selection
-        skin_text = self.font.render("Choose Snake Skin:", True, (255,255,255))
-        self.screen.blit(skin_text, (self.screen_width // 2 - skin_text.get_width() // 2, 180))
-        self.skin_btn_rects = []
-        for idx, skin in enumerate(SKINS):
-            if idx == 4 and not self.legendary_unlocked:
-                continue  # Skip legendary skin if not unlocked
-            btn = self.button_font.render(skin["name"], True, skin["head"])
-            rect = btn.get_rect(center=(self.screen_width // 2 - 180 + idx*120, 240))
-            self.screen.blit(btn, rect)
-            self.skin_btn_rects.append(rect)
-            # Draw color preview
-            pygame.draw.rect(self.screen, skin["head"], (rect.centerx-30, rect.centery+30, 60, 12), border_radius=6)
-            pygame.draw.rect(self.screen, skin["body"], (rect.centerx-30, rect.centery+44, 60, 8), border_radius=4)
-        # Highlight selected skin
-        sel_rect = self.skin_btn_rects[self.skin_idx]
-        pygame.draw.rect(self.screen, (255,255,255), sel_rect, 2)
+        if self.running:
+            self.frame_count += 1
+            if self.frame_count % interval == 0:
+                self.move()
+            self.draw()
+            self.root.after(DELAY, self.update)
+        else:
+            self.canvas.create_text(self.screen_width // 2, self.screen_height // 2 - 40,
+                                    text="GAME OVER", fill="white", font=("Consolas", 48))
+            self.restart_button.place(relx=0.5, rely=0.6, anchor="center")
+            self.menu_button_gameover.place(relx=0.5, rely=0.7, anchor="center")
+            self.exit_button.place(relx=0.5, rely=0.8, anchor="center")
 
-    def draw_gameover(self):
-        self.draw()
-        over_text = self.big_font.render("GAME OVER", True, (255, 255, 255))
-        self.screen.blit(over_text, (self.screen_width // 2 - over_text.get_width() // 2, 120))
-
-        restart_btn = self.button_font.render("Restart", True, (0, 200, 0))
-        menu_btn = self.button_font.render("Menu", True, (0, 150, 200))
-        exit_btn = self.button_font.render("Exit", True, (200, 0, 0))
-
-        self.restart_btn_rect = restart_btn.get_rect(center=(self.screen_width // 2, 300))
-        self.menu_btn_rect = menu_btn.get_rect(center=(self.screen_width // 2, 360))
-        self.exit_btn_rect = exit_btn.get_rect(center=(self.screen_width // 2, 420))
-
-        self.screen.blit(restart_btn, self.restart_btn_rect)
-        self.screen.blit(menu_btn, self.menu_btn_rect)
-        self.screen.blit(exit_btn, self.exit_btn_rect)
-
-    def draw_pause(self):
-        self.draw()
-        pause_text = self.big_font.render("PAUSED", True, (255, 255, 255))
-        self.screen.blit(pause_text, (self.screen_width // 2 - pause_text.get_width() // 2, 120))
-
-        resume_btn = self.button_font.render("Resume", True, (0, 200, 0))
-        menu_btn = self.button_font.render("Menu", True, (0, 150, 200))
-        exit_btn = self.button_font.render("Exit", True, (200, 0, 0))
-
-        self.resume_btn_rect = resume_btn.get_rect(center=(self.screen_width // 2, 300))
-        self.menu_btn_rect = menu_btn.get_rect(center=(self.screen_width // 2, 360))
-        self.exit_btn_rect = exit_btn.get_rect(center=(self.screen_width // 2, 420))
-
-        self.screen.blit(resume_btn, self.resume_btn_rect)
-        self.screen.blit(menu_btn, self.menu_btn_rect)
-        self.screen.blit(exit_btn, self.exit_btn_rect)
+    def update_score(self):
+        self.canvas.itemconfig(self.score_text, text=f"Score: {self.score}    Highscore: {self.highscore}")
 
     def save_highscore(self):
         try:
@@ -235,86 +203,19 @@ class SnakeGame:
                 return 0
         return 0
 
-    def check_achievements(self, score):
-        unlocked = set(self.achievements)
-        for threshold in ACHIEVEMENT_THRESHOLDS:
-            if score >= threshold and threshold not in unlocked:
-                unlocked.add(threshold)
-        if unlocked != self.achievements:
-            self.achievements = unlocked
-            save_achievements(self.achievements)
-
     def create_food(self):
         while True:
-            x = random.randint(0, self.grid_width-1)
-            y = random.randint(0, self.grid_height-1)
+            x = random.randint(0, (self.screen_width - SIZE) // SIZE) * SIZE
+            y = random.randint(0, (self.screen_height - SIZE) // SIZE) * SIZE
             if (x, y) not in self.snake:
-                emoji = random.choice(FOODS)
-                return ((x, y), emoji)
+                return (x, y)
 
-    def run(self):
-        self.start_game()
+    def spawn_powerup(self):
+        types = ["slow", "double"]
+        ptype = random.choice(types)
         while True:
-            self.clock.tick(100)
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.exit_game()
-                elif event.type == pygame.KEYDOWN:
-                    if self.state == "game":
-                        if event.key == pygame.K_UP:
-                            self.change_direction("UP")
-                        elif event.key == pygame.K_DOWN:
-                            self.change_direction("DOWN")
-                        elif event.key == pygame.K_LEFT:
-                            self.change_direction("LEFT")
-                        elif event.key == pygame.K_RIGHT:
-                            self.change_direction("RIGHT")
-                        elif event.key == pygame.K_ESCAPE:
-                            self.pause_game()
-                    elif self.state == "pause":
-                        if event.key == pygame.K_ESCAPE:
-                            self.resume_game()
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    mx, my = event.pos
-                    if self.state == "menu":
-                        for idx, rect in enumerate(self.skin_btn_rects):
-                            if rect.collidepoint(mx, my):
-                                self.skin_idx = idx
-                        if self.start_btn_rect.collidepoint(mx, my):
-                            self.start_game()
-                        elif self.exit_btn_rect.collidepoint(mx, my):
-                            self.exit_game()
-                    elif self.state == "gameover":
-                        if self.restart_btn_rect.collidepoint(mx, my):
-                            self.restart_game()
-                        elif self.menu_btn_rect.collidepoint(mx, my):
-                            return  # <-- Return to caller (menu.py)
-                        elif self.exit_btn_rect.collidepoint(mx, my):
-                            self.exit_game()
-                    elif self.state == "pause":
-                        if self.resume_btn_rect.collidepoint(mx, my):
-                            self.resume_game()
-                        elif self.menu_btn_rect.collidepoint(mx, my):
-                            return  # <-- Return to caller (menu.py)
-                        elif self.exit_btn_rect.collidepoint(mx, my):
-                            self.exit_game()
-
-            if self.state == "menu":
-                self.draw_menu()
-            elif self.state == "game":
-                now = time.time()
-                move_interval = 1.0 / self.speed
-                if now - getattr(self, "last_move_time", 0) >= move_interval:
-                    self.move()
-                    self.last_move_time = now
-                self.draw()
-            elif self.state == "gameover":
-                self.draw_gameover()
-            elif self.state == "pause":
-                self.draw_pause()
-
-            pygame.display.flip()
-
-if __name__ == "__main__":
-    screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-    SnakeGame(screen).run()
+            x = random.randint(0, (self.screen_width - SIZE) // SIZE) * SIZE
+            y = random.randint(0, (self.screen_height - SIZE) // SIZE) * SIZE
+            if (x, y) not in self.snake and (x, y) != self.food:
+                self.powerups.append({"type": ptype, "pos": (x, y)})
+                break
