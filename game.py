@@ -11,6 +11,8 @@ GRID_SIZE = 32
 BASE_SPEED = 8.0
 SPEED_INCREMENT = 2.0
 HIGHSCORE_FILE = "highscore.json"
+ACHIEVEMENT_FILE = "achievments.csv"
+ACHIEVEMENT_THRESHOLDS = [10, 20, 30, 50, 100, 250, 500]
 
 SKINS = [
     {"name": "Classic", "head": (0, 200, 0), "body": (0, 150, 0)},
@@ -20,7 +22,7 @@ SKINS = [
     {"name": "White", "head": (255,255,255), "body": (255,255,255)}, # Placeholder
 ]
 
-FOODS = ["🍏", "🍎"]
+FOODS = ["🍇", "🍈", "🍉", "🍊", "🍋", "🍋‍🟩", "🍌", "🍍", "🥭", "🍐", "🍑", "🍒", "🍓", "🫐", "🥝", "🍎", "🍏"]
 
 def get_rainbow_color(i, t):
     # i: segment index, t: time
@@ -29,6 +31,24 @@ def get_rainbow_color(i, t):
     g = int(128 + 127 * math.sin(freq * i + t + 2))
     b = int(128 + 127 * math.sin(freq * i + t + 4))
     return (r, g, b)
+
+def load_achievements():
+    if os.path.exists(ACHIEVEMENT_FILE):
+        try:
+            with open(ACHIEVEMENT_FILE, "r") as f:
+                lines = f.read().splitlines()
+                return set(int(line) for line in lines if line.strip().isdigit())
+        except:
+            return set()
+    return set()
+
+def save_achievements(achievements):
+    try:
+        with open(ACHIEVEMENT_FILE, "w") as f:
+            for ach in sorted(achievements):
+                f.write(f"{ach}\n")
+    except:
+        pass
 
 class SnakeGame:
     def __init__(self, screen, skin_idx=0, legendary_unlocked=False):
@@ -47,6 +67,7 @@ class SnakeGame:
         self.state = "menu"
         self.skin_idx = skin_idx
         self.legendary_unlocked = legendary_unlocked
+        self.achievements = load_achievements()
 
     def start_game(self):
         self.direction = "RIGHT"
@@ -96,6 +117,7 @@ class SnakeGame:
             if self.score > self.highscore:
                 self.highscore = self.score
                 self.save_highscore()
+                self.check_achievements(self.highscore)
             self.food = self.create_food()
             self.speed = BASE_SPEED + (self.score // 10) * SPEED_INCREMENT
         else:
@@ -212,6 +234,15 @@ class SnakeGame:
             except:
                 return 0
         return 0
+
+    def check_achievements(self, score):
+        unlocked = set(self.achievements)
+        for threshold in ACHIEVEMENT_THRESHOLDS:
+            if score >= threshold and threshold not in unlocked:
+                unlocked.add(threshold)
+        if unlocked != self.achievements:
+            self.achievements = unlocked
+            save_achievements(self.achievements)
 
     def create_food(self):
         while True:
